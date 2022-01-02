@@ -1,5 +1,6 @@
 import glob
 import locale
+import logging
 import argparse
 from datetime import datetime
 
@@ -9,6 +10,9 @@ import matplotlib.pyplot as plt
 import requests
 
 
+# Setup basic logging for crontab log file
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logger = logging.getLogger('HyperPixelCharts')
 locale.setlocale(locale.LC_ALL, "en_CA.UTF-8")
 
 parser = argparse.ArgumentParser()
@@ -25,8 +29,16 @@ def format_k(x, pos):
     return "%1.1fk" % (x * 1e-3)
 
 
+def iqr_outlier_removal(df, colname, whisker_width=1.5, interpolate=None):
+    q1, q3 = df[colname].quantile([0.25,0.75])
+    iqr = q3 - q1
+    outlier = (df[colname] < (q1 - whisker_width * iqr)) | (df[colname] > (q3 + whisker_width * iqr))
+    df.loc[outlier, colname] = np.nan
+    if interpolate: df[colname].interpolate(interpolate, inplace=True)
+
+
 def save_image(filename):
-    print(f'Generating chart: {filename}')
+    logging.info('Generating chart: %s', filename)
     plt.savefig(f'{nfs_dir}/hyperpixel/{filename}',
                 bbox_inches='tight',
                 facecolor='w',
@@ -87,12 +99,13 @@ def generate_bandwitdh_chart():
     df['download'] /= 1e6
     df['upload'] /= 1e6
     df['timestamp'] = pd.to_datetime(df['timestamp'], format='%b %d %Y @ %H:%M:%S')
+    df['hour'] = df['timestamp'].dt.to_period('h')
     update_ts = df['timestamp'].max()
-    df = df.set_index('timestamp')
-    df = df.rolling(5).mean()
-    download_lim = (np.floor(df.download.min()), np.ceil(df.download.max()))
-    upload_lim = (np.floor(df.upload.min()), np.ceil(df.upload.max()))
-    ax = df.download.plot(
+    df = df.groupby('hour').mean()
+    df = df.rolling(24).mean()
+    download_lim = (np.floor(df['download'].min()), np.ceil(df['download'].max()))
+    upload_lim = (np.floor(df['upload'].min()), np.ceil(df['upload'].max()))
+    ax = df['download'].plot(
         figsize=(10,6),
         xlabel='',
         color='#1f77b4',
@@ -102,7 +115,7 @@ def generate_bandwitdh_chart():
     ax.set_ylim(download_lim)
     ax.set_title(f"Internet Bandwidth Monitor (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
     ax2 = ax.twinx()
-    df.upload.plot(
+    df['upload'].plot(
         ax=ax2,
         color='#ff7f0e',
         linewidth=2
@@ -121,13 +134,18 @@ def generate_pihole_chart():
     df = pd.concat(df_list, sort=False)
     update_ts = df['timestamp'].max()
     df = df.set_index('timestamp')
-    ax = df['request_count'].plot(
+    df = df.sort_index()
+    df['rolling'] = df['request_count'].copy()
+    iqr_outlier_removal(df, 'rolling', interpolate='linear')
+    df['rolling'] = df['rolling'].rolling(24).mean()
+    ax = df[['request_count','rolling']].plot(
         figsize=(10,6),
         xlabel='',
         linewidth=2
     )
     ax.set_title(f"PiHole DNS Queries (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
     ax.yaxis.set_major_formatter(plt.FuncFormatter(format_k))
+    ax.legend(['DNS Queries / hour', '24h moving avg'], fontsize=12)
     save_image('pihole.png')
 
 

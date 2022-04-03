@@ -21,6 +21,7 @@ parser.add_argument('--bandwidth', dest='bandwidth', action='store_true', help="
 parser.add_argument('--covid', dest='covid', action='store_true', help="Generate COVID charts")
 parser.add_argument('--pihole', dest='pihole', action='store_true', help="Generate PiHole chart")
 parser.add_argument('--temp', dest='temp', action='store_true', help="Generate CPU Temperature chart")
+parser.add_argument('--airquality', dest='airquality', action='store_true', help="Generate Air Quality Chart")
 args = parser.parse_args()
 nfs_dir = args.nfs
 
@@ -159,7 +160,7 @@ def generate_cpu_temp_chart():
     # reshape DF to have one column per Pi
     df = df.set_index(['hour','hostname']).unstack('hostname')['temp']
 
-    df = df.ffill() # fill gaps in timing of measurement
+    #df = df.ffill() # fill gaps in timing of measurement
 
     ax = df.plot(
         figsize=(10,6),
@@ -170,12 +171,28 @@ def generate_cpu_temp_chart():
     save_image('pitemp.png')
 
 
+def generate_air_quality_chart():
+    df = pd.read_csv(f"{nfs_dir}/airquality.csv")
+    df['TIMESTAMP'] = pd.to_datetime(df['TIMESTAMP'], format='%b %d %Y @ %H:%M:%S')
+    update_ts = df['TIMESTAMP'].max()
+    df = df.set_index('TIMESTAMP')
+    ax = df.plot(
+            figsize=(10,6),
+            xlabel=''
+    )
+    ax.legend(title=False, loc='upper left', fontsize=12)
+    ax.set_title(f"Air Quality Monitor (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
+    save_image('airquality.png')
+
+
 if __name__ == '__main__':
     if args.bandwidth: generate_bandwitdh_chart()
 
     if args.pihole: generate_pihole_chart()
 
     if args.temp: generate_cpu_temp_chart()
+
+    if args.airquality: generate_air_quality_chart()
 
     if args.covid:
         update_ts = requests.get("http://api.opencovid.ca/version").json().get('version')

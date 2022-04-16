@@ -104,6 +104,9 @@ def generate_bandwitdh_chart():
     update_ts = df['timestamp'].max()
     df = df.groupby('hour').mean()
     df = df.rolling(24).mean()
+    df = df.groupby(pd.Grouper(freq='D')).mean()
+    iqr_outlier_removal(df, 'download', interpolate='linear')
+    iqr_outlier_removal(df, 'upload', interpolate='linear')
     download_lim = (np.floor(df['download'].min()), np.ceil(df['download'].max()))
     upload_lim = (np.floor(df['upload'].min()), np.ceil(df['upload'].max()))
     ax = df['download'].plot(
@@ -129,16 +132,18 @@ def generate_bandwitdh_chart():
 def generate_pihole_chart():
     df_list = []
     for csv in glob.glob(f"{nfs_dir}/pihole/*.csv"):
-        df = pd.read_csv(csv, parse_dates=['timestamp'])
+        df = pd.read_csv(csv)
         df_list.append(df)
 
     df = pd.concat(df_list, sort=False)
+    df['timestamp'] = pd.to_datetime(df['timestamp'], format='%Y-%m-%d %H:%M')
+    df.sort_values(by='timestamp', ascending=True, inplace=True)
     update_ts = df['timestamp'].max()
-    df = df.set_index('timestamp')
-    df = df.sort_index()
+    df = df.groupby(pd.Grouper(freq='D', key='timestamp')).agg({'request_count': 'mean'})
+    df['request_count'].interpolate(inplace=True)
     df['rolling'] = df['request_count'].copy()
     iqr_outlier_removal(df, 'rolling', interpolate='linear')
-    df['rolling'] = df['rolling'].rolling(24).mean()
+    df['rolling'] = df['rolling'].rolling(7).mean()
     ax = df[['request_count','rolling']].plot(
         figsize=(10,6),
         xlabel='',
@@ -146,7 +151,7 @@ def generate_pihole_chart():
     )
     ax.set_title(f"PiHole DNS Queries (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
     ax.yaxis.set_major_formatter(plt.FuncFormatter(format_k))
-    ax.legend(['DNS Queries / hour', '24h moving avg'], fontsize=12)
+    ax.legend(['Average DNS Queries / day', '7d moving avg'], fontsize=12)
     save_image('pihole.png')
 
 
@@ -154,16 +159,15 @@ def generate_cpu_temp_chart():
     df = pd.read_csv(f"{nfs_dir}/pitemp.csv", parse_dates=['timestamp'])
     update_ts = df['timestamp'].max()
 
-    # keep one data point per Pi per hour
-    df['hour'] = df['timestamp'].dt.to_period('h')
+    # keep one data point per Pi per day
+    df = df.groupby([pd.Grouper(freq='D', key='timestamp'), 'hostname']).agg({'temp':'mean'})
 
     # reshape DF to have one column per Pi
-    df = df.set_index(['hour','hostname']).unstack('hostname')['temp']
-
-    #df = df.ffill() # fill gaps in timing of measurement
+    df = df.unstack('hostname')['temp']
 
     ax = df.plot(
         figsize=(10,6),
+        linewidth=2,
         xlabel=''
     )
     ax.legend(title=False, loc='upper left', fontsize=12)
@@ -175,7 +179,7 @@ def generate_air_quality_chart():
     df = pd.read_csv(f"{nfs_dir}/airquality.csv")
     df['TIMESTAMP'] = pd.to_datetime(df['TIMESTAMP'], format='%b %d %Y @ %H:%M:%S')
     update_ts = df['TIMESTAMP'].max()
-    df = df.set_index('TIMESTAMP')
+    df = df.groupby(pd.Grouper(freq='D', key='TIMESTAMP')).max() # keep highest value per day
     ax = df.plot(
             figsize=(10,6),
             xlabel=''

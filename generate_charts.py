@@ -1,3 +1,4 @@
+import re
 import glob
 import locale
 import logging
@@ -6,6 +7,7 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import requests
 
@@ -22,6 +24,7 @@ parser.add_argument('--covid', dest='covid', action='store_true', help="Generate
 parser.add_argument('--pihole', dest='pihole', action='store_true', help="Generate PiHole chart")
 parser.add_argument('--temp', dest='temp', action='store_true', help="Generate CPU Temperature chart")
 parser.add_argument('--airquality', dest='airquality', action='store_true', help="Generate Air Quality Chart")
+parser.add_argument('--iperf', dest='iperf', action='store_true', help="Generate iPerf Chart")
 args = parser.parse_args()
 nfs_dir = args.nfs
 
@@ -188,6 +191,49 @@ def generate_air_quality_chart():
     ax.set_title(f"Air Quality Monitor (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
     save_image('airquality.png')
 
+def generate_iperf_chart():
+    df_list = []
+    file_pat = re.compile(f"{nfs_dir}/iperf/(?P<client>[^.]+)\.csv")
+    for csv in glob.glob(f"{nfs_dir}/iperf/*.csv"):
+        m = file_pat.match(csv)
+        df = pd.read_csv(csv)
+        df['client'] = m.group('client')
+        df_list.append(df)
+    df = pd.concat(df_list, sort=False)
+
+    df['date'] = pd.to_datetime(df['date'], format='%a, %d %b %Y %H:%M:%S %Z')
+    df['date'] = df['date'].dt.tz_localize(None)
+    df['hour'] = df['date'].dt.to_period('h')
+
+    df = df[['client','hour','rcvd_mbps']]
+    colors = iter(mpl.rcParams['axes.prop_cycle'])
+    clients = df['client'].unique()
+    colors = {client: color for client in clients for color in next(colors).values()}
+
+    client_avg = df.groupby('client')['rcvd_mbps'].mean()
+    global_avg = client_avg.mean()
+    client_avg = client_avg.reset_index()
+    client_low = client_avg.loc[client_avg['rcvd_mbps'] < global_avg, 'client']
+    df_low = df.loc[df['client'].isin(client_low)]
+    df_high = df.loc[~df['client'].isin(client_low)]
+
+    df_low = df_low.set_index(['hour','client'])['rcvd_mbps'].unstack('client')
+    df_high = df_high.set_index(['hour','client'])['rcvd_mbps'].unstack('client')
+
+    ax1 = df_low.plot(
+            figsize=(10,6),
+            xlabel='',
+            color=[colors[c] for c in df_low.columns]
+    )
+    ax1.legend(title=False, loc='upper left', fontsize=12)
+    ax1.set_title('Internal Network Performance', fontsize=14)
+    ax2 = ax1.twinx()
+    df_high.plot(
+        ax=ax2,
+        color=[colors[c] for c in df_high.columns]
+    )
+    ax2.legend(title=False, loc='upper right', fontsize=12)
+    save_image('iperf.png')
 
 if __name__ == '__main__':
     if args.bandwidth: generate_bandwitdh_chart()
@@ -205,4 +251,6 @@ if __name__ == '__main__':
         for filename, (data_key, datecol, valuecol, title, format_fn) in COVID_CHART_CONFIG.items():
             df = generate_covid_df(data[data_key], datecol, valuecol)
             generate_covid_chart(df, title, filename, format_fn, update_ts, save_chart=True)
+
+    if args.iperf: generate_iperf_chart()
 

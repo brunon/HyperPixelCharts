@@ -1,3 +1,4 @@
+import os
 import re
 import glob
 import locale
@@ -50,6 +51,7 @@ def save_image(filename):
                 orientation='landscape',
                 transparent=False,
                 dpi=100)
+    plt.close()
 
 
 def generate_covid_df(json, datecol, valuecol):
@@ -98,38 +100,43 @@ COVID_CHART_CONFIG = {
 
 
 def generate_bandwitdh_chart():
-    csv_file = f"{nfs_dir}/bandwidth_monitor.csv"
-    df = pd.read_csv(csv_file)
-    df['download'] /= 1e6
-    df['upload'] /= 1e6
-    df['timestamp'] = pd.to_datetime(df['timestamp'], format='%b %d %Y @ %H:%M:%S')
-    df['hour'] = df['timestamp'].dt.to_period('h')
-    update_ts = df['timestamp'].max()
-    df = df.groupby('hour').mean()
-    df = df.rolling(24).mean()
-    df = df.groupby(pd.Grouper(freq='D')).mean()
-    iqr_outlier_removal(df, 'download', interpolate='linear')
-    iqr_outlier_removal(df, 'upload', interpolate='linear')
-    download_lim = (np.floor(df['download'].min()), np.ceil(df['download'].max()))
-    upload_lim = (np.floor(df['upload'].min()), np.ceil(df['upload'].max()))
-    ax = df['download'].plot(
-        figsize=(10,6),
-        xlabel='',
-        color='#1f77b4',
-        linewidth=2
-    )
-    ax.set_ylabel('Download Speed (Mbps)', color='#1f77b4', weight='bold', fontsize=12)
-    ax.set_ylim(download_lim)
-    ax.set_title(f"Internet Bandwidth Monitor (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
-    ax2 = ax.twinx()
-    df['upload'].plot(
-        ax=ax2,
-        color='#ff7f0e',
-        linewidth=2
-    )
-    ax2.set_ylabel('Upload Speed (Mbps)', color='#ff7f0e', weight='bold', fontsize=12)
-    ax2.set_ylim(upload_lim)
-    save_image('bandwidth.png')
+    df_list = []
+    for csv in glob.glob(f"{nfs_dir}/bandwidth/*.csv"):
+        df = pd.read_csv(csv)
+        filename = os.path.basename(csv).split('.')[0]
+        df_list.append((filename,df))
+
+    for filename, df in df_list:
+        df['download'] /= 1e6
+        df['upload'] /= 1e6
+        df['timestamp'] = pd.to_datetime(df['timestamp'], format='%b %d %Y @ %H:%M:%S')
+        df['hour'] = df['timestamp'].dt.to_period('h')
+        update_ts = df['timestamp'].max()
+        df = df.groupby('hour').mean()
+        df = df.rolling(24).mean()
+        df = df.groupby(pd.Grouper(freq='D')).mean()
+        iqr_outlier_removal(df, 'download', interpolate='linear')
+        iqr_outlier_removal(df, 'upload', interpolate='linear')
+        download_lim = (np.floor(df['download'].min()), np.ceil(df['download'].max()))
+        upload_lim = (np.floor(df['upload'].min()), np.ceil(df['upload'].max()))
+        ax = df['download'].plot(
+            figsize=(10,6),
+            xlabel='',
+            color='#1f77b4',
+            linewidth=2
+        )
+        ax.set_ylabel('Download Speed (Mbps)', color='#1f77b4', weight='bold', fontsize=12)
+        ax.set_ylim(download_lim)
+        ax.set_title(f"Internet Bandwidth Monitor - {filename} (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
+        ax2 = ax.twinx()
+        df['upload'].plot(
+            ax=ax2,
+            color='#ff7f0e',
+            linewidth=2
+        )
+        ax2.set_ylabel('Upload Speed (Mbps)', color='#ff7f0e', weight='bold', fontsize=12)
+        ax2.set_ylim(upload_lim)
+        save_image(f"bandwidth-{filename}.png")
 
 
 def generate_pihole_chart():
@@ -204,35 +211,41 @@ def generate_iperf_chart():
     df['date'] = pd.to_datetime(df['date'], format='%a, %d %b %Y %H:%M:%S %Z')
     df['date'] = df['date'].dt.tz_localize(None)
     df['hour'] = df['date'].dt.to_period('h')
+    update_ts = df['date'].max()
 
     df = df[['client','hour','rcvd_mbps']]
     colors = iter(mpl.rcParams['axes.prop_cycle'])
     clients = df['client'].unique()
     colors = {client: color for client in clients for color in next(colors).values()}
 
-    client_avg = df.groupby('client')['rcvd_mbps'].mean()
-    global_avg = client_avg.mean()
-    client_avg = client_avg.reset_index()
-    client_low = client_avg.loc[client_avg['rcvd_mbps'] < global_avg, 'client']
+    client_avg = df.groupby('client', as_index=False)['rcvd_mbps'].mean()
+    client_low = client_avg.loc[client_avg['rcvd_mbps'] < 100, 'client']
     df_low = df.loc[df['client'].isin(client_low)]
     df_high = df.loc[~df['client'].isin(client_low)]
 
     df_low = df_low.set_index(['hour','client'])['rcvd_mbps'].unstack('client')
     df_high = df_high.set_index(['hour','client'])['rcvd_mbps'].unstack('client')
+    low_max = df_low.max().max()
+
+    df_low = df_low.rolling(3, center=True).mean().iloc[1:]
+    df_high = df_high.rolling(3, center=True).mean().iloc[1:]
 
     ax1 = df_low.plot(
             figsize=(10,6),
             xlabel='',
             color=[colors[c] for c in df_low.columns]
     )
-    ax1.legend(title=False, loc='upper left', fontsize=12)
-    ax1.set_title('Internal Network Performance', fontsize=14)
+    ax1.legend(title=False, loc='lower left', fontsize=12)
+    ax1.set_title(f"Internal Network Performance (Mbits); updated {update_ts.strftime('%b %d %H:%M')}", fontsize=14)
+    ax1.yaxis.grid()
+    ax1.set_ylim((0, low_max))
     ax2 = ax1.twinx()
     df_high.plot(
         ax=ax2,
         color=[colors[c] for c in df_high.columns]
     )
-    ax2.legend(title=False, loc='upper right', fontsize=12)
+    ax2.legend(title=False, loc='lower right', fontsize=12)
+    ax2.set_ylim((0,1000))
     save_image('iperf.png')
 
 if __name__ == '__main__':

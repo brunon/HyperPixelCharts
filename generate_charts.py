@@ -227,8 +227,8 @@ def generate_iperf_chart():
     df_high = df_high.set_index(['hour','client'])['rcvd_mbps'].unstack('client')
     low_max = df_low.max().max()
 
-    df_low = df_low.rolling(3, center=True).mean().iloc[1:]
-    df_high = df_high.rolling(3, center=True).mean().iloc[1:]
+    df_low = df_low.rolling('1D', center=True).mean()
+    df_high = df_high.rolling('1D', center=True).mean()
 
     ax1 = df_low.plot(
             figsize=(10,6),

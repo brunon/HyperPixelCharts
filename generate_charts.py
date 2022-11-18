@@ -26,6 +26,7 @@ parser.add_argument('--pihole', dest='pihole', action='store_true', help="Genera
 parser.add_argument('--temp', dest='temp', action='store_true', help="Generate CPU Temperature chart")
 parser.add_argument('--airquality', dest='airquality', action='store_true', help="Generate Air Quality Chart")
 parser.add_argument('--iperf', dest='iperf', action='store_true', help="Generate iPerf Chart")
+parser.add_argument('--pistat', dest='pistat', action='store_true', help="Generate CPU/RAM/DISK Chart")
 args = parser.parse_args()
 nfs_dir = args.nfs
 
@@ -248,6 +249,28 @@ def generate_iperf_chart():
     ax2.set_ylim((0,1000))
     save_image('iperf.png')
 
+def generate_pistat_chart():
+    df = pd.read_csv(f'{nfs_dir}/cpu_mem_stats.csv', parse_dates=['timestamp'])
+    update_ts = df['timestamp'].max()
+
+    # keep one data point per Pi per day
+    # TODO convert from H to D when enough data points are available
+    df = df.groupby([pd.Grouper(freq='H', key='timestamp'), 'hostname']).mean()
+
+    # reshape DF to have one column per Pi
+    df = df.unstack('hostname')
+
+    for stat in ['cpu','ram','disk']:
+        ax = df[stat].plot(
+            figsize=(10,6),
+            linewidth=2,
+            xlabel=''
+        )
+        ax.legend(title=False, loc='upper left', fontsize=12)
+        ax.set_title(f"Raspberry Pi {stat.capitalize()} Usage % (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
+        save_image(f'pi{stat}.png')
+
+
 if __name__ == '__main__':
     if args.bandwidth: generate_bandwitdh_chart()
 
@@ -267,3 +290,5 @@ if __name__ == '__main__':
 
     if args.iperf: generate_iperf_chart()
 
+    if args.pistat:
+        generate_pistat_chart()

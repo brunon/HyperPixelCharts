@@ -253,19 +253,32 @@ def generate_pistat_chart():
     df = pd.read_csv(f'{nfs_dir}/cpu_mem_stats.csv', parse_dates=['timestamp'])
     update_ts = df['timestamp'].max()
 
+    colors = iter(mpl.rcParams['axes.prop_cycle'])
+    hostnames = df['hostname'].unique()
+    colors = {hostname: color for hostname in hostnames for color in next(colors).values()}
+
     # keep one data point per Pi per day
-    # TODO convert from H to D when enough data points are available
-    df = df.groupby([pd.Grouper(freq='H', key='timestamp'), 'hostname']).mean()
+    df = df.groupby([pd.Grouper(freq='D', key='timestamp'), 'hostname']).agg(['mean','std'])
 
     # reshape DF to have one column per Pi
     df = df.unstack('hostname')
 
     for stat in ['cpu','ram','disk']:
-        ax = df[stat].plot(
+        y = df[stat]['mean']
+        hosts = y.columns
+        ax = y.plot(
             figsize=(10,6),
-            linewidth=2,
-            xlabel=''
+            linewidth=3,
+            color=[colors[h] for h in hosts],
+            xlabel='',
         )
+        for h in hosts:
+            err = df[stat]['std'][h]
+            plt.fill_between(df.index,
+                             y[h] - err,
+                             y[h] + err,
+                             alpha=.2,
+                             color=colors[h])
         ax.legend(title=False, loc='upper left', fontsize=12)
         ax.set_title(f"Raspberry Pi {stat.capitalize()} Usage % (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
         save_image(f'pi{stat}.png')

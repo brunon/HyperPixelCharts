@@ -221,30 +221,49 @@ def generate_iperf_chart():
 
     client_avg = df.groupby('client', as_index=False)['rcvd_mbps'].mean()
     client_low = client_avg.loc[client_avg['rcvd_mbps'] < 100, 'client']
+    client_high = set(clients) - set(client_low)
     df_low = df.loc[df['client'].isin(client_low)]
-    df_high = df.loc[~df['client'].isin(client_low)]
+    df_high = df.loc[df['client'].isin(client_high)]
 
     df_low = df_low.set_index(['hour','client'])['rcvd_mbps'].unstack('client')
     df_high = df_high.set_index(['hour','client'])['rcvd_mbps'].unstack('client')
     low_max = df_low.max().max()
 
-    df_low = df_low.rolling('1D', center=True).mean()
-    df_high = df_high.rolling('1D', center=True).mean()
+    df_low = df_low.rolling('1D', center=True).agg(['mean','std']).stack('client')
+    df_high = df_high.rolling('1D', center=True).agg(['mean','std']).stack('client')
 
-    ax1 = df_low.plot(
+    ax1 = df_low['mean'].unstack('client').plot(
             figsize=(10,6),
             xlabel='',
-            color=[colors[c] for c in df_low.columns]
+            color=[colors[c] for c in client_low]
     )
+    for c in client_low:
+        y = df_low['mean'].unstack('client')[c]
+        err = df_low['std'].unstack('client')[c]
+        plt.fill_between(y.index,
+                         y - err,
+                         y + err,
+                         color=colors[c],
+                         alpha=.2)
+
     ax1.legend(title=False, loc='lower left', fontsize=12)
     ax1.set_title(f"Internal Network Performance (Mbits); updated {update_ts.strftime('%b %d %H:%M')}", fontsize=14)
     ax1.yaxis.grid()
     ax1.set_ylim((0, low_max))
     ax2 = ax1.twinx()
-    df_high.plot(
+    df_high['mean'].unstack('client').plot(
         ax=ax2,
-        color=[colors[c] for c in df_high.columns]
+        color=[colors[c] for c in client_high]
     )
+    for c in client_high:
+        y = df_high['mean'].unstack('client')[c]
+        err = df_high['std'].unstack('client')[c]
+        plt.fill_between(y.index,
+                         y - err,
+                         y + err,
+                         color=colors[c],
+                         alpha=.2)
+    
     ax2.legend(title=False, loc='lower right', fontsize=12)
     ax2.set_ylim((0,1000))
     save_image('iperf.png')

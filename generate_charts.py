@@ -170,17 +170,27 @@ def generate_cpu_temp_chart():
     df = pd.read_csv(f"{nfs_dir}/pitemp.csv", parse_dates=['timestamp'])
     update_ts = df['timestamp'].max()
 
+    colors = iter(mpl.rcParams['axes.prop_cycle'])
+    hostnames = df['hostname'].unique()
+    colors = {h: color for h in hostnames for color in next(colors).values()}
+
     # keep one data point per Pi per day
-    df = df.groupby([pd.Grouper(freq='D', key='timestamp'), 'hostname']).agg({'temp':'mean'})
+    df = df.groupby([pd.Grouper(freq='D', key='timestamp'), 'hostname'])['temp'].agg(['mean','std'])
 
-    # reshape DF to have one column per Pi
-    df = df.unstack('hostname')['temp']
-
-    ax = df.plot(
+    ax = df['mean'].unstack('hostname').plot(
         figsize=(10,6),
         linewidth=2,
-        xlabel=''
+        xlabel='',
+        color=[colors[h] for h in df['mean'].unstack('hostname').columns]
     )
+    for h in hostnames:
+        y = df['mean'].unstack('hostname')[h]
+        err = df['std'].unstack('hostname')[h]
+        plt.fill_between(y.index,
+                         y - err,
+                         y + err,
+                         color=colors[h],
+                         alpha=.2)
     ax.legend(title=False, loc='upper left', fontsize=12)
     ax.set_title(f"Raspberry Pi CPU Temperature (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
     save_image('pitemp.png')
@@ -235,7 +245,7 @@ def generate_iperf_chart():
     ax1 = df_low['mean'].unstack('client').plot(
             figsize=(10,6),
             xlabel='',
-            color=[colors[c] for c in client_low]
+            color=[colors[c] for c in df_low['mean'].unstack('client').columns]
     )
     for c in client_low:
         y = df_low['mean'].unstack('client')[c]
@@ -253,7 +263,7 @@ def generate_iperf_chart():
     ax2 = ax1.twinx()
     df_high['mean'].unstack('client').plot(
         ax=ax2,
-        color=[colors[c] for c in client_high]
+        color=[colors[c] for c in df_high['mean'].unstack('client').columns]
     )
     for c in client_high:
         y = df_high['mean'].unstack('client')[c]

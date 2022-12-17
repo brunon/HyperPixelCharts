@@ -4,13 +4,17 @@ import glob
 import locale
 import logging
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import requests
+
+import sys
+from email.mime.text import MIMEText
+from subprocess import Popen, PIPE
 
 
 # Setup basic logging for crontab log file
@@ -27,6 +31,7 @@ parser.add_argument('--temp', dest='temp', action='store_true', help="Generate C
 parser.add_argument('--airquality', dest='airquality', action='store_true', help="Generate Air Quality Chart")
 parser.add_argument('--iperf', dest='iperf', action='store_true', help="Generate iPerf Chart")
 parser.add_argument('--pistat', dest='pistat', action='store_true', help="Generate CPU/RAM/DISK Chart")
+parser.add_argument('--alert-email', help='Send alert for missing data to provided email')
 args = parser.parse_args()
 nfs_dir = args.nfs
 
@@ -166,8 +171,23 @@ def generate_pihole_chart():
     save_image('pihole.png')
 
 
-def generate_cpu_temp_chart():
+def generate_cpu_temp_chart(alert_email: str):
     df = pd.read_csv(f"{nfs_dir}/pitemp.csv", parse_dates=['timestamp'])
+    
+    # check if all hosts have up-to-date information pushed
+    today = datetime.today().date()
+    yesterday = today - timedelta(days=1)
+    updates = df.groupby('hostname')['timestamp'].max().to_frame('max_timestamp')
+    updated_last_24h = updates['max_timestamp'].dt.date.isin([today,yesterday])
+    missing_data = updates.loc[~updated_last_24h].index.values
+    if len(missing_data) > 0 and alert_email:
+        msg = MIMEText(f"Please investigate missing RaspberryPi data for hosts: {', '.join(missing_data)}")
+        msg['From'] = alert_email
+        msg['To'] = alert_email
+        msg['Subject'] = f"Missing RaspberryPi data on {today.date()}"
+        p = Popen(['/usr/sbin/sendmail', '-t', '-oi'], stdin=PIPE)
+        p.communicate(msg.as_bytes())
+
     update_ts = df['timestamp'].max()
 
     colors = iter(mpl.rcParams['axes.prop_cycle'])
@@ -318,7 +338,7 @@ if __name__ == '__main__':
 
     if args.pihole: generate_pihole_chart()
 
-    if args.temp: generate_cpu_temp_chart()
+    if args.temp: generate_cpu_temp_chart(args.alert_email)
 
     if args.airquality: generate_air_quality_chart()
 

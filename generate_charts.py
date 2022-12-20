@@ -184,7 +184,7 @@ def generate_cpu_temp_chart(alert_email: str):
         msg = MIMEText(f"Please investigate missing RaspberryPi data for hosts: {', '.join(missing_data)}")
         msg['From'] = alert_email
         msg['To'] = alert_email
-        msg['Subject'] = f"Missing RaspberryPi data on {today.date()}"
+        msg['Subject'] = f"Missing RaspberryPi data on {today}"
         p = Popen(['/usr/sbin/sendmail', '-t', '-oi'], stdin=PIPE)
         p.communicate(msg.as_bytes())
 

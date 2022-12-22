@@ -41,3 +41,6 @@ Here are some examples monitoring my personal home network:
 ![Pi CPU](examples/picpu.png)
 ![Pi RAM](examples/piram.png)
 ![Pi Disk](examples/pidisk.png)
+
+### PiHole DNS Query Stats
+![PiHole DNS Stats](examples/pihole.png)

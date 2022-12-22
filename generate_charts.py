@@ -1,9 +1,11 @@
 import os
 import re
 import glob
+import json
 import locale
 import logging
 import argparse
+from typing import Dict
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -58,6 +60,25 @@ def save_image(filename):
                 transparent=False,
                 dpi=100)
     plt.close()
+
+
+def pi_colors(hostnames: pd.Series) -> Dict[str, str]:
+    picolors_json = os.path.join(nfs_dir, 'picolors.json')
+    if not os.path.exists(picolors_json):
+        pi_colors = {}
+    else:
+        with open(picolors_json, 'r') as f:
+            pi_colors = json.load(f)
+
+    # if any new Pi host is added, need to rebuild colors dict
+    if any(h not in pi_colors for h in hostnames.unique()):
+        colors_iter = iter(mpl.rcParams['axes.prop_cycle'])
+        sorted_hostnames = sorted(hostnames.unique(), key=lambda h: h.lower())
+        pi_colors = {h: color for h in sorted_hostnames for color in next(colors_iter).values()}
+        with open(picolors_json, 'w') as f:
+            json.dump(pi_colors, f)
+
+    return pi_colors
 
 
 def generate_covid_df(json, datecol, valuecol):
@@ -190,9 +211,8 @@ def generate_cpu_temp_chart(alert_email: str):
 
     update_ts = df['timestamp'].max()
 
-    colors = iter(mpl.rcParams['axes.prop_cycle'])
     hostnames = df['hostname'].unique()
-    colors = {h: color for h in hostnames for color in next(colors).values()}
+    colors = pi_colors(df['hostname'])
 
     # keep one data point per Pi per day
     df = df.groupby([pd.Grouper(freq='D', key='timestamp'), 'hostname'])['temp'].agg(['mean','std'])
@@ -245,9 +265,8 @@ def generate_iperf_chart():
     update_ts = df['date'].max()
 
     df = df[['client','hour','rcvd_mbps']]
-    colors = iter(mpl.rcParams['axes.prop_cycle'])
-    clients = df['client'].unique()
-    colors = {client: color for client in clients for color in next(colors).values()}
+    clients = df['client']
+    colors = pi_colors(df['client'])
 
     client_avg = df.groupby('client', as_index=False)['rcvd_mbps'].mean()
     client_low = client_avg.loc[client_avg['rcvd_mbps'] < 100, 'client']
@@ -264,6 +283,7 @@ def generate_iperf_chart():
 
     ax1 = df_low['mean'].unstack('client').plot(
             figsize=(10,6),
+            linewidth=2,
             xlabel='',
             color=[colors[c] for c in df_low['mean'].unstack('client').columns]
     )
@@ -283,6 +303,7 @@ def generate_iperf_chart():
     ax2 = ax1.twinx()
     df_high['mean'].unstack('client').plot(
         ax=ax2,
+        linewidth=2,
         color=[colors[c] for c in df_high['mean'].unstack('client').columns]
     )
     for c in client_high:
@@ -302,9 +323,7 @@ def generate_pistat_chart():
     df = pd.read_csv(f'{nfs_dir}/cpu_mem_stats.csv', parse_dates=['timestamp'])
     update_ts = df['timestamp'].max()
 
-    colors = iter(mpl.rcParams['axes.prop_cycle'])
-    hostnames = df['hostname'].unique()
-    colors = {hostname: color for hostname in hostnames for color in next(colors).values()}
+    colors = pi_colors(df['hostname'])
 
     # keep one data point per Pi per day
     df = df.groupby([pd.Grouper(freq='D', key='timestamp'), 'hostname']).agg(['mean','std'])
@@ -317,7 +336,7 @@ def generate_pistat_chart():
         hosts = y.columns
         ax = y.plot(
             figsize=(10,6),
-            linewidth=3,
+            linewidth=2,
             color=[colors[h] for h in hosts],
             xlabel='',
         )

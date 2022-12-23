@@ -299,7 +299,7 @@ def generate_iperf_chart():
     ax1.legend(title=False, loc='lower left', fontsize=12)
     ax1.set_title(f"Internal Network Performance (Mbits); updated {update_ts.strftime('%b %d %H:%M')}", fontsize=14)
     ax1.yaxis.grid()
-    ax1.set_ylim((0, low_max))
+    ax1.set_ylim((0, low_max * 1.5))
     ax2 = ax1.twinx()
     df_high['mean'].unstack('client').plot(
         ax=ax2,

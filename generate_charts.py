@@ -373,7 +373,7 @@ def generate_iperf_chart():
     save_image('iperf.png')
 
 def generate_pistat_chart():
-    df = pd.read_csv(f'{nfs_dir}/cpu_mem_stats.csv', parse_dates=['timestamp'])
+    df = concat_csv_files(f'{nfs_dir}/pistat/*.csv', parse_dates=['timestamp'])
     update_ts = df['timestamp'].max()
     save_update_ts('pistats', update_ts)
 

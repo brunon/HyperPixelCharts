@@ -172,6 +172,14 @@ COVID_CHART_CONFIG = {
 }
 
 
+def concat_csv_files(glob_path, **kwargs):
+    df_list = []
+    for csv in glob.glob(glob_path):
+        df = pd.read_csv(csv, **kwargs)
+        df_list.append(df)
+    return pd.concat(df_list, sort=False)
+
+
 def generate_bandwitdh_chart():
     df_list = []
     for csv in glob.glob(f"{nfs_dir}/bandwidth/*.csv"):
@@ -214,12 +222,7 @@ def generate_bandwitdh_chart():
 
 
 def generate_pihole_chart():
-    df_list = []
-    for csv in glob.glob(f"{nfs_dir}/pihole/*.csv"):
-        df = pd.read_csv(csv)
-        df_list.append(df)
-
-    df = pd.concat(df_list, sort=False)
+    df = concat_csv_files(f"{nfs_dir}/pihole/*.csv")
     df['timestamp'] = pd.to_datetime(df['timestamp'], format='%Y-%m-%d %H:%M')
     df.sort_values(by='timestamp', ascending=True, inplace=True)
     update_ts = df['timestamp'].max()
@@ -241,7 +244,7 @@ def generate_pihole_chart():
 
 
 def generate_cpu_temp_chart(alert_email: str):
-    df = pd.read_csv(f"{nfs_dir}/pitemp.csv", parse_dates=['timestamp'])
+    df = concat_csv_files(f"{nfs_dir}/pitemp/*.csv", parse_dates=['timestamp'])
     
     # check if all hosts have up-to-date information pushed
     today = datetime.today().date()

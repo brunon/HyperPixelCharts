@@ -6,6 +6,6 @@ dir=${1:-$script_dir}
 now=$(date +"%Y-%m-%d %H:%M:%S")
 temp=$(vcgencmd measure_temp | egrep -o '[0-9]*\.[0-9]*')
 host=$(hostname -s)
-csv=$dir/pitemp.csv
+csv=$dir/pitemp/${host}.csv
 
 echo "${host},${now},${temp}" >> $csv

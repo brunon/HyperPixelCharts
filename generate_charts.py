@@ -34,6 +34,7 @@ parser.add_argument('--airquality', dest='airquality', action='store_true', help
 parser.add_argument('--iperf', dest='iperf', action='store_true', help="Generate iPerf Chart")
 parser.add_argument('--pistat', dest='pistat', action='store_true', help="Generate CPU/RAM/DISK Chart")
 parser.add_argument('--alert-email', help='Send alert for missing data to provided email')
+parser.add_argument('--check-last-updated', action='store_true', help="Check all charts are updated today/yesterday")
 args = parser.parse_args()
 nfs_dir = args.nfs
 
@@ -81,6 +82,49 @@ def pi_colors(hostnames: pd.Series) -> Dict[str, str]:
     return pi_colors
 
 
+def save_update_ts(chart: str, last_updated: datetime):
+    file_path = os.path.join(nfs_dir, 'last_updated.json')
+    if os.path.exists(file_path):
+        with open(file_path, 'r') as f:
+            last_updated_dict = json.load(f)
+    else:
+        last_updated_dict = {}
+
+    last_updated_dict[chart] = last_updated.strftime('%Y-%m-%d %H:%M')
+    with open(file_path, 'w') as f:
+        json.dump(last_updated_dict, f)
+
+
+def send_alert_email(subject, body, email):
+    msg = MIMEText(body)
+    msg['From'] = email
+    msg['To'] = email
+    msg['Subject'] = subject
+    p = Popen(['/usr/sbin/sendmail', '-t', '-oi'], stdin=PIPE)
+    p.communicate(msg.as_bytes())
+
+
+def check_last_updated(alert_email):
+    today = datetime.today().date()
+    yesterday = today - timedelta(days=1)
+    charts_missing_data = []
+    with open(os.path.join(nfs_dir, 'last_updated.json')) as f:
+        last_updated = json.load(f)
+        for chart, update_ts in last_updated.items():
+            logging.info("Data for chart %s last updated on %s", chart, update_ts)
+            update_ts = datetime.strptime(update_ts, '%Y-%m-%d %H:%M')
+            if update_ts.date() not in [today, yesterday]:
+                logging.warn("Chart %s is out of date!", chart)
+                charts_missing_data.append(chart)
+
+    if charts_missing_data and alert_email:
+        send_alert_email(
+                subject='HyperPixel Charts are not updated',
+                body=f"These charts have not been updated in 48h: {', '.join(charts)}",
+                email=alert_email
+                )
+
+
 def generate_covid_df(json, datecol, valuecol):
     df = pd.DataFrame(data=json)
     df = df.astype({datecol: 'datetime64'})
@@ -107,6 +151,7 @@ def generate_covid_chart(df, title, filename, y_format_fn=None, update_ts=None, 
     ax.legend(['7d moving avg', '30d moving avg'])
     if y_format_fn: ax.yaxis.set_major_formatter(plt.FuncFormatter(y_format_fn))
     if update_ts:
+        save_update_ts('covid', update_ts)
         title += f" (updated {update_ts.strftime('%b %d %H:%M')})"
     ax.set_title(title, fontsize=14)
     if save_chart: save_image(filename)
@@ -139,6 +184,7 @@ def generate_bandwitdh_chart():
         df['timestamp'] = pd.to_datetime(df['timestamp'], format='%b %d %Y @ %H:%M:%S')
         df['hour'] = df['timestamp'].dt.to_period('h')
         update_ts = df['timestamp'].max()
+        save_update_ts('bandwidth', update_ts)
         df = df.groupby('hour').mean()
         df = df.rolling(24).mean()
         df = df.groupby(pd.Grouper(freq='D')).mean()
@@ -176,6 +222,7 @@ def generate_pihole_chart():
     df['timestamp'] = pd.to_datetime(df['timestamp'], format='%Y-%m-%d %H:%M')
     df.sort_values(by='timestamp', ascending=True, inplace=True)
     update_ts = df['timestamp'].max()
+    save_update_ts('pihole', update_ts)
     df = df.groupby(pd.Grouper(freq='D', key='timestamp')).agg({'request_count': 'mean'})
     df['request_count'].interpolate(inplace=True)
     df['rolling'] = df['request_count'].copy()
@@ -202,14 +249,14 @@ def generate_cpu_temp_chart(alert_email: str):
     updated_last_24h = updates['max_timestamp'].dt.date.isin([today,yesterday])
     missing_data = updates.loc[~updated_last_24h].index.values
     if len(missing_data) > 0 and alert_email:
-        msg = MIMEText(f"Please investigate missing RaspberryPi data for hosts: {', '.join(missing_data)}")
-        msg['From'] = alert_email
-        msg['To'] = alert_email
-        msg['Subject'] = f"Missing RaspberryPi data on {today}"
-        p = Popen(['/usr/sbin/sendmail', '-t', '-oi'], stdin=PIPE)
-        p.communicate(msg.as_bytes())
+        send_alert_email(
+                subject=f"Missing RaspberryPi data on {today}",
+                body=f"Please investigate missing RaspberryPi data for hosts: {', '.join(missing_data)}",
+                email=alert_email
+                )
 
     update_ts = df['timestamp'].max()
+    save_update_ts('temp', update_ts)
 
     hostnames = df['hostname'].unique()
     colors = pi_colors(df['hostname'])
@@ -240,6 +287,7 @@ def generate_air_quality_chart():
     df = pd.read_csv(f"{nfs_dir}/airquality.csv")
     df['TIMESTAMP'] = pd.to_datetime(df['TIMESTAMP'], format='%b %d %Y @ %H:%M:%S')
     update_ts = df['TIMESTAMP'].max()
+    save_update_ts('airquality', update_ts)
     df = df.groupby(pd.Grouper(freq='D', key='TIMESTAMP')).max() # keep highest value per day
     ax = df.plot(
             figsize=(10,6),
@@ -263,6 +311,7 @@ def generate_iperf_chart():
     df['date'] = df['date'].dt.tz_localize(None)
     df['hour'] = df['date'].dt.to_period('h')
     update_ts = df['date'].max()
+    save_update_ts('iperf', update_ts)
 
     df = df[['client','hour','rcvd_mbps']]
     clients = df['client']
@@ -322,6 +371,7 @@ def generate_iperf_chart():
 def generate_pistat_chart():
     df = pd.read_csv(f'{nfs_dir}/cpu_mem_stats.csv', parse_dates=['timestamp'])
     update_ts = df['timestamp'].max()
+    save_update_ts('pistats', update_ts)
 
     colors = pi_colors(df['hostname'])
 
@@ -371,5 +421,6 @@ if __name__ == '__main__':
 
     if args.iperf: generate_iperf_chart()
 
-    if args.pistat:
-        generate_pistat_chart()
+    if args.pistat: generate_pistat_chart()
+
+    if args.check_last_updated: check_last_updated(args.alert_email)

@@ -73,6 +73,7 @@ def pi_colors(hostnames: pd.Series) -> Dict[str, str]:
 
     # if any new Pi host is added, need to rebuild colors dict
     if any(h not in pi_colors for h in hostnames.unique()):
+        logging.info("Regenerating picolors.json file, had %s needed %s", ','.join(sorted(pi_colors.keys())), ','.join(sorted(hostnames.unique())))
         colors_iter = iter(mpl.rcParams['axes.prop_cycle'])
         sorted_hostnames = sorted(hostnames.unique(), key=lambda h: h.lower())
         pi_colors = {h: color for h in sorted_hostnames for color in next(colors_iter).values()}

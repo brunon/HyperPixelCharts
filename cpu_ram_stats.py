@@ -11,6 +11,7 @@ import psutil
 import shutil
 import argparse
 from datetime import datetime
+from filelock import FileLock
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--csv', required=True, help="CSV output path")
@@ -23,7 +24,10 @@ disk_usage = round(psutil.disk_usage('/').percent, 1)
 hostname = socket.gethostname()
 ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-with open(args.csv, 'a') as f:
-    writer = csv.writer(f)
-    writer.writerow((hostname, cpu_usage, ram_usage, disk_usage, ts))
+lock_file = args.csv + '.lock'
+lock = FileLock(lock_file, timeout=10)
+with lock:
+    with open(args.csv, 'a') as f:
+        writer = csv.writer(f)
+        writer.writerow((hostname, cpu_usage, ram_usage, disk_usage, ts))
 

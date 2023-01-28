@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import glob
 import json
 import locale
@@ -7,16 +8,14 @@ import logging
 import argparse
 from typing import Dict
 from datetime import datetime, timedelta
+from email.mime.text import MIMEText
+from subprocess import Popen, PIPE
 
 import numpy as np
 import pandas as pd
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import requests
-
-import sys
-from email.mime.text import MIMEText
-from subprocess import Popen, PIPE
 
 
 # Setup basic logging for crontab log file

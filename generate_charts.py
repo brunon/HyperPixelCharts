@@ -193,7 +193,7 @@ def generate_bandwitdh_chart():
         df['hour'] = df['timestamp'].dt.to_period('h')
         update_ts = df['timestamp'].max()
         save_update_ts('bandwidth', update_ts)
-        df = df.groupby('hour').mean()
+        df = df.groupby('hour').mean(numeric_only=True)
         df = df.rolling(24).mean()
         df = df.groupby(pd.Grouper(freq='D')).mean()
         iqr_outlier_removal(df, 'download', interpolate='linear')

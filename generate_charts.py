@@ -120,7 +120,7 @@ def check_last_updated(alert_email):
     if charts_missing_data and alert_email:
         send_alert_email(
                 subject='HyperPixel Charts are not updated',
-                body=f"These charts have not been updated in 48h: {', '.join(charts)}",
+                body=f"These charts have not been updated in 48h: {', '.join(charts_missing_data)}",
                 email=alert_email
                 )
 

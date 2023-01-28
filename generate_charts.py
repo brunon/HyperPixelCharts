@@ -292,11 +292,33 @@ def generate_air_quality_chart():
     df['TIMESTAMP'] = pd.to_datetime(df['TIMESTAMP'], format='%b %d %Y @ %H:%M:%S')
     update_ts = df['TIMESTAMP'].max()
     save_update_ts('airquality', update_ts)
-    df = df.groupby(pd.Grouper(freq='D', key='TIMESTAMP')).max() # keep highest value per day
-    ax = df.plot(
-            figsize=(10,6),
-            xlabel=''
-    )
+
+    # compute peak value in a given hour
+    df = df.set_index('TIMESTAMP').sort_index()
+    df = df.groupby(pd.Grouper(freq='H')).max()
+
+    # reshape the DF to one row per PM type
+    df = df.stack().to_frame('PM_VALUE')
+    df.index = df.index.set_names(['TIMESTAMP','PM_TYPE'])
+    df = df.reset_index()
+
+    pm_types = df.PM_TYPE.unique()
+    colors_iter = iter(mpl.rcParams['axes.prop_cycle'])
+    colors = {pm: next(colors_iter)['color'] for pm in pm_types}
+
+    # compute average value per day (with standard deviation for error bars)
+    df = df.groupby([pd.Grouper(freq='D', key='TIMESTAMP'), 'PM_TYPE'])['PM_VALUE'].agg(['mean','std'])
+
+    ax = df['mean'].unstack('PM_TYPE')[pm_types].plot(figsize=(10,6), xlabel='', linewidth=2, color=colors.values())
+    for p in pm_types:
+        y = df['mean'].unstack('PM_TYPE')[p]
+        err = df['std'].unstack('PM_TYPE')[p]
+        plt.fill_between(y.index,
+                         (y - err).clip(lower=0),
+                         y + err,
+                         color=colors[p],
+                         alpha=.2)
+
     ax.legend(title=False, loc='upper left', fontsize=12)
     ax.set_title(f"Air Quality Monitor (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
     save_image('airquality.png')

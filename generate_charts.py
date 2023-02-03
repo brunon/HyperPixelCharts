@@ -333,9 +333,9 @@ def generate_iperf_chart():
     df = pd.concat(df_list, sort=False)
 
     df['date'] = pd.to_datetime(df['date'], format='%a, %d %b %Y %H:%M:%S %Z')
+    update_ts = df['date'].max().astimezone('America/Montreal')
     df['date'] = df['date'].dt.tz_localize(None)
     df['hour'] = df['date'].dt.to_period('h')
-    update_ts = df['date'].max()
     save_update_ts('iperf', update_ts)
 
     df = df[['client','hour','rcvd_mbps']]

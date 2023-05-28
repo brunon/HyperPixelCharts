@@ -42,6 +42,7 @@ class HyperPixel:
         logger.info('Client %s connected', ':'.join(map(str, client_addr)))
         self.image_files = list(sorted(glob.glob(self.image_path_glob)))
         logger.info('%d image files available', len(self.image_files))
+        self.toggle_lcd_state(on=True)
 
     def kill_image(self):
         if self.feh_pid:
@@ -108,6 +109,7 @@ if __name__ == '__main__':
         sock.listen(1)
         sock.settimeout(0.5)
         hp = HyperPixel(args.images)
+        hp.toggle_lcd_state(on=False)
         logger.info('Waiting for connections on %s', ':'.join(map(str, server_address)))
         while True:
             connection = None

@@ -196,6 +196,9 @@ def generate_bandwitdh_chart():
         df = df.groupby('hour').mean(numeric_only=True)
         df = df.rolling(24).mean()
         df = df.groupby(pd.Grouper(freq='D')).mean()
+        df = df.dropna()
+        if df.empty:
+            continue
         iqr_outlier_removal(df, 'download', interpolate='linear')
         iqr_outlier_removal(df, 'upload', interpolate='linear')
         download_lim = (np.floor(df['download'].min()), np.ceil(df['download'].max()))

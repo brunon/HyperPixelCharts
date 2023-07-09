@@ -211,7 +211,7 @@ def generate_bandwitdh_chart():
         )
         ax.set_ylabel('Download Speed (Mbps)', color='#1f77b4', weight='bold', fontsize=12)
         ax.set_ylim(download_lim)
-        ax.set_title(f"Internet Bandwidth Monitor - {filename} (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
+        ax.set_title(f"Internet Bandwidth Monitor - {filename.replace('_',' ')} (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
         ax2 = ax.twinx()
         df['upload'].plot(
             ax=ax2,

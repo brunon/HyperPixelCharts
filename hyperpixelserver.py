@@ -2,6 +2,8 @@ import os
 import sys
 import glob
 import socket
+from socket import error as SocketError
+import errno
 import logging
 import itertools
 import subprocess
@@ -82,17 +84,24 @@ class HyperPixel:
         self.display_image(self.image_files[i])
         self.current_image = i
 
-    def command_callback(self, command: str):
+    def command_callback(self, command: str) -> str:
         if command == 'on':
             self.toggle_lcd_state(on=True)
+            return 'ok'
         elif command == 'off':
             self.toggle_lcd_state(on=False)
+            return 'ok'
         elif command == 'previous':
             self.change_image(forward=False)
+            return 'ok'
         elif command == 'next':
             self.change_image(forward=True)
+            return 'ok'
+        elif command == 'ping':
+            return 'pong'
         else:
             logger.error('WTF: %s', command)
+            return 'WTF?'
 
 
 if __name__ == '__main__':
@@ -121,15 +130,25 @@ if __name__ == '__main__':
                     data = connection.recv(1024)
                     msg = data.decode("utf-8")
                     logger.debug('received: %s', msg)
-                    if data: hp.command_callback(msg)
-                    else: break
+                    if data:
+                        response = hp.command_callback(msg)
+                        try:
+                            connection.send(response.encode("utf-8"))
+                        except:
+                            pass
+                    else:
+                        break
             except socket.timeout:
                 continue
             except KeyboardInterrupt:
                 hp.client_disconnected(connection, client_address)
                 break
+            except SocketError as e:
+                if e.errno != errno.ECONNRESET:
+                    raise
+                pass
             except Exception as e:
-                logger.exception('Error:', e)
+                logger.error('Error: %s', e)
                 hp.client_disconnected(connection, client_address)
                 break
     except KeyboardInterrupt:

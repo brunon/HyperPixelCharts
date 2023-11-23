@@ -186,13 +186,14 @@ def generate_bandwitdh_chart():
         filename = os.path.basename(csv).split('.')[0]
         df_list.append((filename,df))
 
+    update_ts = []
     for filename, df in df_list:
         df['download'] /= 1e6
         df['upload'] /= 1e6
         df['timestamp'] = pd.to_datetime(df['timestamp'], format='%b %d %Y @ %H:%M:%S')
         df['hour'] = df['timestamp'].dt.to_period('h')
-        update_ts = df['timestamp'].max()
-        save_update_ts('bandwidth', update_ts)
+        this_update_ts = df['timestamp'].max()
+        update_ts.append(this_update_ts)
         df = df.groupby('hour').mean(numeric_only=True)
         df = df.rolling(24).mean()
         df = df.groupby(pd.Grouper(freq='D')).mean()
@@ -211,7 +212,7 @@ def generate_bandwitdh_chart():
         )
         ax.set_ylabel('Download Speed (Mbps)', color='#1f77b4', weight='bold', fontsize=12)
         ax.set_ylim(download_lim)
-        ax.set_title(f"Internet Bandwidth Monitor - {filename.replace('_',' ')} (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
+        ax.set_title(f"Internet Bandwidth Monitor - {filename.replace('_',' ')} (updated {this_update_ts.strftime('%b %d %H:%M')})", fontsize=14)
         ax2 = ax.twinx()
         df['upload'].plot(
             ax=ax2,
@@ -222,6 +223,7 @@ def generate_bandwitdh_chart():
         ax2.set_ylim(upload_lim)
         save_image(f"bandwidth-{filename}.png")
 
+    save_update_ts('bandwidth', max(update_ts))
 
 def generate_pihole_chart():
     df = concat_csv_files(f"{nfs_dir}/pihole/*.csv")

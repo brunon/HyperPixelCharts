@@ -35,6 +35,7 @@ parser.add_argument('--airquality', dest='airquality', action='store_true', help
 parser.add_argument('--iperf', dest='iperf', action='store_true', help="Generate iPerf Chart")
 parser.add_argument('--pistat', dest='pistat', action='store_true', help="Generate CPU/RAM/DISK Chart")
 parser.add_argument('--enviro', dest='enviro', action='store_true', help="Generate Enviro Charts")
+parser.add_argument('--weather', dest='weather', action='store_true', help="Generate Weather Charts")
 parser.add_argument('--alert-email', help='Send alert for missing data to provided email')
 parser.add_argument('--check-last-updated', action='store_true', help="Check all charts are updated today/yesterday")
 parser.add_argument('--influx-config', dest='influx_config', help="Influx DB Config file")
@@ -66,8 +67,9 @@ def save_image(filename):
     plt.close()
 
 
-def pi_colors(hostnames: pd.Series) -> Dict[str, str]:
-    picolors_json = os.path.join(nfs_dir, 'picolors.json')
+def pi_colors(hostnames: pd.Series, file_suffix: str = "") -> Dict[str, str]:
+    filename = f"picolors{file_suffix}.json"
+    picolors_json = os.path.join(nfs_dir, filename)
     if not os.path.exists(picolors_json):
         pi_colors = {}
     else:
@@ -76,7 +78,7 @@ def pi_colors(hostnames: pd.Series) -> Dict[str, str]:
 
     # if any new Pi host is added, need to rebuild colors dict
     if any(h not in pi_colors for h in hostnames.unique()):
-        logging.info("Regenerating picolors.json file, had %s needed %s", ','.join(sorted(pi_colors.keys())), ','.join(sorted(hostnames.unique())))
+        logging.info(f"Regenerating {filename} file, had %s needed %s", ','.join(sorted(pi_colors.keys())), ','.join(sorted(hostnames.unique())))
         colors_iter = iter(mpl.rcParams['axes.prop_cycle'])
         all_hostnames = set(list(pi_colors.keys()) + list(hostnames.values))
         sorted_hostnames = sorted(all_hostnames, key=lambda h: h.lower())
@@ -436,11 +438,19 @@ def generate_pistat_chart():
         ax.set_title(f"Raspberry Pi {stat.capitalize()} Usage % (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
         save_image(f'pi{stat}.png')
 
-def generate_enviro_charts():
+
+def _query_influx_db(query: str) -> pd.DataFrame:
     with open(args.influx_config) as f:
         config = yaml.safe_load(f)
     client = influxdb_client.InfluxDBClient(url=config['influx']['url'], token=config['influx']['token'], org=config['influx']['org'])
     query_api = client.query_api()
+    df_list = query_api.query_data_frame(query)
+    df = pd.concat(df_list, sort=False) if isinstance(df_list, list) else df_list
+    df = df.drop(columns=['result','table'])
+    return df
+
+
+def generate_enviro_charts():
     query = f"""
 from(bucket:"enviro")
     |> range(start: 1970-01-01T00:00:00Z, stop: now())
@@ -448,11 +458,11 @@ from(bucket:"enviro")
     |> pivot(rowKey: ["_time","_measurement"], columnKey: ["device"], valueColumn: "_value")
     |> drop(columns: ["_start","_stop","_field"])
     """.strip()
-    df_list = query_api.query_data_frame(query)
-    df = pd.concat(df_list, sort=False)
-    df = df.drop(columns=['result','table'])
+    df = _query_influx_db(query)
+    update_ts = df['_time'].max().astimezone('America/Montreal')
+    save_update_ts('enviro', update_ts)
 
-    colors = pi_colors(pd.Series(df.drop(columns=['_time','_measurement']).columns.values))
+    colors = pi_colors(pd.Series(df.drop(columns=['_time','_measurement']).columns.values), file_suffix="-enviro")
     stats_to_ignore = ['color_temperature','luminance']
 
     for stat in (s for s in df['_measurement'].unique() if s not in stats_to_ignore and not s.startswith('gas_')):
@@ -469,7 +479,9 @@ from(bucket:"enviro")
             xlabel=''
         )
         ax.legend(title=False, loc='upper left', fontsize=12)
-        ax.set_title("Environment: " + stat.capitalize(), fontsize=14)
+        title = "Air Quality Index" if stat == 'aqi' else stat.capitalize()
+
+        ax.set_title(f"Enviro Indoor: {title} (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
         save_image(f'enviro-{stat}.png')
 
     gas_stats = [s for s in df['_measurement'].unique() if s.startswith('gas_')]
@@ -483,15 +495,58 @@ from(bucket:"enviro")
         gas_df = gas_df.set_index(['_time','_measurement'])
         gas_df = gas_df.unstack('_measurement')
         gas_df.columns = gas_df.columns.to_flat_index()
+        hosts = [h for h,_ in gas_df.columns]
         gas_df.columns = [h.replace('-',' ').replace('_',' ').title() + " - " + g for h,g in gas_df.columns]
         ax = gas_df.plot(
 			figsize=(10,6),
 			linewidth=2,
+            color=[colors[h] for h in hosts],
 			xlabel=''
     	)
         ax.legend(title=False, loc='upper left', fontsize=12)
-        ax.set_title("Environment: Gases", fontsize=14)
+        ax.set_title(f"Enviro Indoor: Gases (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
         save_image('enviro-gas.png')
+
+
+def generate_weather_charts():
+    df_list = []
+    for bucket, tag in [('enviro-urban', 'device'), ('weather', 'source')]:
+        query = f"""
+    from(bucket:"{bucket}")
+        |> range(start: 1970-01-01T00:00:00Z, stop: now())
+        |> aggregateWindow(every: 1h, fn: mean, createEmpty: false)
+        |> pivot(rowKey: ["_time","_measurement"], columnKey: ["{tag}"], valueColumn: "_value")
+        |> drop(columns: ["_start","_stop","_field"])
+        """.strip()
+        df_list.append(_query_influx_db(query))
+
+    df = df_list[0]
+    for x in df_list[1:]:
+        df = df.merge(x, on=['_time','_measurement'], how='outer')
+
+    update_ts = df['_time'].max().astimezone('America/Montreal')
+    save_update_ts('weather', update_ts)
+
+    colors = pi_colors(pd.Series(df.drop(columns=['_time','_measurement']).columns.values), file_suffix="-enviro")
+
+    for stat in ['humidity', 'pressure', 'temperature']:
+        stat_df = df.loc[df['_measurement'] == stat].drop(columns=['_measurement']).set_index('_time')
+        hosts = stat_df.columns
+        stat_df = stat_df.rename(columns={
+            c: 'Environment Canada' if c.startswith('ec-') else c.replace('-',' ').replace('_',' ').title()
+            for c in stat_df.columns
+        })
+        ax = stat_df.plot(
+            figsize=(10,6),
+            linewidth=2,
+            color=[colors[h] for h in hosts],
+            xlabel=''
+        )
+        ax.legend(title=False, loc='upper left', fontsize=12)
+        title = stat.capitalize()
+
+        ax.set_title(f"Weather: {title} (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
+        save_image(f'weather-{stat}.png')
 
 
 if __name__ == '__main__':
@@ -518,4 +573,6 @@ if __name__ == '__main__':
     if args.check_last_updated: check_last_updated(args.alert_email)
 
     if args.enviro: generate_enviro_charts()
+
+    if args.weather: generate_weather_charts()
 

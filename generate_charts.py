@@ -508,7 +508,8 @@ from(bucket:"enviro")
         save_image('enviro-gas.png')
 
 
-def generate_weather_charts():
+def generate_weather_charts(alert_email: str):
+    tz = "America/Montreal"
     df_list = []
     for bucket, tag in [('enviro-urban', 'device'), ('weather', 'source')]:
         query = f"""
@@ -518,13 +519,22 @@ def generate_weather_charts():
         |> pivot(rowKey: ["_time","_measurement"], columnKey: ["{tag}"], valueColumn: "_value")
         |> drop(columns: ["_start","_stop","_field"])
         """.strip()
-        df_list.append(_query_influx_db(query))
+        df = _query_influx_db(query)
+        time_since_update = (pd.Timestamp.now(tz=tz) - df['_time'].max().astimezone(tz)).total_seconds()
+        hours_since_update = time_since_update / 60 / 60
+        if hours_since_update > 3 and alert_email:
+            send_alert_email(
+                    subject='Stale Weather Data',
+                    body=f"Weather data from {tag} is {hours_since_update} hours old",
+                    email=alert_email
+                    )
+        df_list.append(df)
 
     df = df_list[0]
     for x in df_list[1:]:
         df = df.merge(x, on=['_time','_measurement'], how='outer')
 
-    update_ts = df['_time'].max().astimezone('America/Montreal')
+    update_ts = df['_time'].max().astimezone(tz)
     save_update_ts('weather', update_ts)
 
     colors = pi_colors(pd.Series(df.drop(columns=['_time','_measurement']).columns.values), file_suffix="-enviro")
@@ -574,5 +584,5 @@ if __name__ == '__main__':
 
     if args.enviro: generate_enviro_charts()
 
-    if args.weather: generate_weather_charts()
+    if args.weather: generate_weather_charts(args.alert_email)
 

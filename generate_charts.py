@@ -522,7 +522,7 @@ def generate_weather_charts(alert_email: str):
         df = _query_influx_db(query)
         time_since_update = (pd.Timestamp.now(tz=tz) - df['_time'].max().astimezone(tz)).total_seconds()
         hours_since_update = time_since_update / 60 / 60
-        if hours_since_update > 3 and alert_email:
+        if hours_since_update > 24 and alert_email:
             send_alert_email(
                     subject='Stale Weather Data',
                     body=f"Weather data from {tag} is {hours_since_update} hours old",

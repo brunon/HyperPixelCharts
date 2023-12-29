@@ -537,13 +537,33 @@ def generate_weather_charts(alert_email: str):
     update_ts = df['_time'].max().astimezone(tz)
     save_update_ts('weather', update_ts)
 
+    # convert forecast values into temperature fields in their own columns
+    forecasts = [f for f in df['_measurement'].unique() if f.startswith("forecast-")]
+    for f in forecasts: df = df.assign(**{f: np.NaN})
+    non_forecast_df = df.loc[~df['_measurement'].isin(forecasts)]
+    forecast_df = df.loc[df['_measurement'].isin(forecasts)]
+    forecast_temp = forecast_df.drop(columns=['_time','_measurement']).dropna(axis=1, how='all').iloc[:,0]
+    for f in forecasts:
+        forecast_df.loc[forecast_df['_measurement'] == f, f] = forecast_temp
+
+    forecast_df = forecast_df.assign(**{'_measurement': 'temperature'})
+    forecast_df = forecast_df.drop(columns=[forecast_temp.name])
+
+    df = pd.concat([non_forecast_df, forecast_df], sort=False)
     colors = pi_colors(pd.Series(df.drop(columns=['_time','_measurement']).columns.values), file_suffix="-enviro")
 
     for stat in ['humidity', 'pressure', 'temperature']:
-        stat_df = df.loc[df['_measurement'] == stat].drop(columns=['_measurement']).set_index('_time')
+        stat_df = df.loc[df['_measurement'] == stat].drop(columns=['_measurement'])
+        stat_df = stat_df.sort_values('_time').groupby(pd.Grouper(freq='H', key='_time')).mean(numeric_only=True).dropna(how='all')
+        stat_df = stat_df.dropna(axis=1, how='all')
+        stat_df = stat_df.interpolate()
         hosts = stat_df.columns
         stat_df = stat_df.rename(columns={
-            c: 'Environment Canada' if c.startswith('ec-') else c.replace('-',' ').replace('_',' ').title()
+            c: (
+                'EC - Current' if c.startswith('ec-')
+                else f"EC - {c[-1]} Day Forecast" if c.startswith('forecast-')
+                else c.replace('-',' ').replace('_',' ').title()
+                )
             for c in stat_df.columns
         })
         ax = stat_df.plot(

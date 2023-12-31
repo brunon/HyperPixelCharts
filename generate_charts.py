@@ -36,6 +36,7 @@ parser.add_argument('--iperf', dest='iperf', action='store_true', help="Generate
 parser.add_argument('--pistat', dest='pistat', action='store_true', help="Generate CPU/RAM/DISK Chart")
 parser.add_argument('--enviro', dest='enviro', action='store_true', help="Generate Enviro Charts")
 parser.add_argument('--weather', dest='weather', action='store_true', help="Generate Weather Charts")
+parser.add_argument('--life', dest='life', action='store_true', help="Generate Game of Life Stats Chart")
 parser.add_argument('--alert-email', help='Send alert for missing data to provided email')
 parser.add_argument('--check-last-updated', action='store_true', help="Check all charts are updated today/yesterday")
 parser.add_argument('--influx-config', dest='influx_config', help="Influx DB Config file")
@@ -579,6 +580,39 @@ def generate_weather_charts(alert_email: str):
         save_image(f'weather-{stat}.png')
 
 
+def generate_game_of_life_chart():
+    df = pd.read_csv(f"{nfs_dir}/gameoflife.csv")
+    df['timestamp'] = pd.to_datetime(df['timestamp'], format='%b %d %Y @ %H:%M:%S')
+    update_ts = df['timestamp'].max()
+    save_update_ts('gameoflife', update_ts)
+
+    colors_iter = iter(mpl.rcParams['axes.prop_cycle'])
+    duration_color = next(colors_iter)['color']
+    iterations_color = next(colors_iter)['color']
+
+    df = df.drop(columns=['all_dead'])
+    df = df.groupby(pd.Grouper(freq='H', key='timestamp')).agg(['mean','std'])
+    df = df.dropna(how='all')
+
+    y1 = df['duration']['mean']
+    err = df['duration']['std']
+    ax1 = y1.plot(figsize=(10,6), color=duration_color, xlabel='', linewidth=3)
+    plt.fill_between(y1.index, y1 - err, y1 + err, alpha=.2, color=duration_color)
+    ax1.set_ylabel("Duration (sec)", fontsize=12)
+    ax1.set_ylim((0, max(y1.max(), 30)))
+    ax1.set_title(f"Game of Life Stats (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
+    ax1.legend(["Duration (sec)"], title=False, loc='lower right', fontsize=12)
+
+    ax2 = ax1.twinx()
+    y2 = df['iterations']['mean']
+    y2.plot(ax=ax2, xlabel='', color=iterations_color, linewidth=3)
+    ax2.set_ylim((0, y2.max() * 1.1))
+    ax2.set_ylabel("Iterations", fontsize=12)
+    ax2.legend(["Iterations"], title=False, loc='upper left', fontsize=12)
+
+    save_image('gameoflife.png')
+
+
 if __name__ == '__main__':
     if args.bandwidth: generate_bandwitdh_chart()
 
@@ -606,3 +640,4 @@ if __name__ == '__main__':
 
     if args.weather: generate_weather_charts(args.alert_email)
 
+    if args.life: generate_game_of_life_chart()

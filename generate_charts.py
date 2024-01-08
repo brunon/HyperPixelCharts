@@ -526,7 +526,7 @@ def generate_weather_charts(alert_email: str):
         if hours_since_update > 24 and alert_email:
             send_alert_email(
                     subject='Stale Weather Data',
-                    body=f"Weather data from {tag} is {hours_since_update} hours old",
+                    body=f"Weather data in {bucket} is {hours_since_update} hours old",
                     email=alert_email
                     )
         df_list.append(df)

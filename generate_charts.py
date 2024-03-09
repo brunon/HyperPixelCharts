@@ -37,6 +37,7 @@ parser.add_argument('--pistat', dest='pistat', action='store_true', help="Genera
 parser.add_argument('--enviro', dest='enviro', action='store_true', help="Generate Enviro Charts")
 parser.add_argument('--weather', dest='weather', action='store_true', help="Generate Weather Charts")
 parser.add_argument('--life', dest='life', action='store_true', help="Generate Game of Life Stats Chart")
+parser.add_argument('--voltage', dest='voltage', action='store_true', help="Generate Enviro Battery Voltage Chart")
 parser.add_argument('--alert-email', help='Send alert for missing data to provided email')
 parser.add_argument('--check-last-updated', action='store_true', help="Check all charts are updated today/yesterday")
 parser.add_argument('--influx-config', dest='influx_config', help="Influx DB Config file")
@@ -580,6 +581,37 @@ def generate_weather_charts(alert_email: str):
         save_image(f'weather-{stat}.png')
 
 
+def generate_enviro_voltage_chart():
+    df_list = []
+    for bucket in ["enviro-urban"]:
+        query = f"""
+    from(bucket:"{bucket}")
+        |> range(start: 1970-01-01T00:00:00Z, stop: now())
+        |> filter(fn: (r) => r["_measurement"] == "voltage")
+        |> aggregateWindow(every: 1h, fn: mean, createEmpty: false)
+        |> pivot(rowKey: ["_time","_measurement"], columnKey: ["device"], valueColumn: "_value")
+        |> drop(columns: ["_start","_stop","_field"])
+        """.strip()
+        df_list.append(_query_influx_db(query))
+
+    df = pd.concat(df_list)
+    update_ts = df['_time'].max().astimezone('America/Montreal')
+    save_update_ts('voltage', update_ts)
+
+    colors = pi_colors(pd.Series(df.drop(columns=['_time','_measurement']).columns.values), file_suffix="-enviro")
+
+    df = df.drop(columns=['_measurement']).set_index('_time')
+    hosts = df.columns
+    ax = df.plot(
+        figsize=(10,6),
+        linewidth=2,
+        color=[colors[h] for h in hosts],
+        xlabel=''
+    )
+    ax.legend(title=False, loc='upper left', fontsize=12)
+    ax.set_title(f"Enviro Battery Voltage (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
+    save_image(f'enviro-voltage.png')
+
 def generate_game_of_life_chart():
     df = pd.read_csv(f"{nfs_dir}/gameoflife.csv")
     df['timestamp'] = pd.to_datetime(df['timestamp'], format='%b %d %Y @ %H:%M:%S')
@@ -641,3 +673,5 @@ if __name__ == '__main__':
     if args.weather: generate_weather_charts(args.alert_email)
 
     if args.life: generate_game_of_life_chart()
+
+    if args.voltage: generate_enviro_voltage_chart()

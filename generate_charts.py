@@ -559,6 +559,7 @@ def generate_weather_charts(alert_email: str):
         stat_df = stat_df.sort_values('_time').groupby(pd.Grouper(freq='H', key='_time')).mean(numeric_only=True).dropna(how='all')
         stat_df = stat_df.dropna(axis=1, how='all')
         stat_df = stat_df.interpolate()
+        stat_df = stat_df.groupby(pd.Grouper(freq='D')).mean()
         hosts = stat_df.columns
         stat_df = stat_df.rename(columns={
             c: (
@@ -588,7 +589,7 @@ def generate_enviro_voltage_chart():
     from(bucket:"{bucket}")
         |> range(start: 1970-01-01T00:00:00Z, stop: now())
         |> filter(fn: (r) => r["_measurement"] == "voltage")
-        |> aggregateWindow(every: 1h, fn: mean, createEmpty: false)
+        |> aggregateWindow(every: 4h, fn: mean, createEmpty: false)
         |> pivot(rowKey: ["_time","_measurement"], columnKey: ["device"], valueColumn: "_value")
         |> drop(columns: ["_start","_stop","_field"])
         """.strip()

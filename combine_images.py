@@ -13,8 +13,13 @@ args = parser.parse_args()
 
 def combine_images(output_path, offset_height):
     image_paths = glob.glob(args.images)
-    chosen_images = random.choices(image_paths, k=2)
-    images = [Image.open(x) for x in chosen_images]
+    image1 = random.choice(image_paths)
+    
+    # remove image1 to avoid a duplicate
+    image_paths.remove(image1)
+    image2 = random.choice(image_paths)
+
+    images = [Image.open(x) for x in [image1, image2]]
     widths, heights = zip(*(i.size for i in images))
     max_width = max(widths)
     total_height = sum(heights) + offset_height
@@ -24,7 +29,7 @@ def combine_images(output_path, offset_height):
         new_im.paste(im, (0, y_offset))
         y_offset += im.size[1] + offset_height
     new_im.save(output_path)
-    return chosen_images
+    return [image1, image2]
 
 if __name__ == '__main__':
     temp_image = "/tmp/combined_image_temp.png"  # save to tmpfs dir

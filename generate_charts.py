@@ -197,20 +197,19 @@ def generate_bandwitdh_chart():
 
     update_ts = []
     for filename, df in df_list:
+        df = df.dropna(how='all').drop(columns=['server'])
+        if df.empty:
+            continue
         df['download'] /= 1e6
         df['upload'] /= 1e6
         df['timestamp'] = pd.to_datetime(df['timestamp'], format='%b %d %Y @ %H:%M:%S')
-        df['hour'] = df['timestamp'].dt.to_period('h')
-        this_update_ts = df['timestamp'].max()
-        update_ts.append(this_update_ts)
-        df = df.groupby('hour').mean(numeric_only=True)
-        df = df.rolling(24).mean()
-        df = df.groupby(pd.Grouper(freq='D')).mean()
-        df = df.dropna()
-        if df.empty:
-            continue
         iqr_outlier_removal(df, 'download', interpolate='linear')
         iqr_outlier_removal(df, 'upload', interpolate='linear')
+        df = df.sort_values(by='timestamp', ascending=True)
+        this_update_ts = df['timestamp'].max()
+        update_ts.append(this_update_ts)
+        df = df.groupby(pd.Grouper(freq='D', key='timestamp')).median()
+        df = df.rolling(7).mean().dropna(how='all')
         download_lim = (np.floor(df['download'].min()), np.ceil(df['download'].max()))
         upload_lim = (np.floor(df['upload'].min()), np.ceil(df['upload'].max()))
         ax = df['download'].plot(
@@ -221,6 +220,7 @@ def generate_bandwitdh_chart():
         )
         ax.set_ylabel('Download Speed (Mbps)', color='#1f77b4', weight='bold', fontsize=12)
         ax.set_ylim(download_lim)
+        ax.yaxis.grid()
         ax.set_title(f"Internet Bandwidth Monitor - {filename.replace('_',' ')} (updated {this_update_ts.strftime('%b %d %H:%M')})", fontsize=14)
         ax2 = ax.twinx()
         df['upload'].plot(
@@ -240,10 +240,10 @@ def generate_pihole_chart():
     df.sort_values(by='timestamp', ascending=True, inplace=True)
     update_ts = df['timestamp'].max()
     save_update_ts('pihole', update_ts)
+    iqr_outlier_removal(df, 'request_count', interpolate='linear')
     df = df.groupby(pd.Grouper(freq='D', key='timestamp')).agg({'request_count': 'mean'})
     df['request_count'].interpolate(inplace=True)
     df['rolling'] = df['request_count'].copy()
-    iqr_outlier_removal(df, 'rolling', interpolate='linear')
     df['rolling'] = df['rolling'].rolling(7).mean()
     ax = df[['request_count','rolling']].plot(
         figsize=(10,6),
@@ -252,6 +252,7 @@ def generate_pihole_chart():
     )
     ax.set_title(f"PiHole DNS Queries (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
     ax.yaxis.set_major_formatter(plt.FuncFormatter(format_k))
+    ax.yaxis.grid()
     ax.legend(['Average DNS Queries / day', '7d moving avg'], fontsize=12)
     save_image('pihole.png')
 
@@ -295,6 +296,7 @@ def generate_cpu_temp_chart(alert_email: str):
                          y + err,
                          color=colors[h],
                          alpha=.2)
+    ax.yaxis.grid()
     ax.legend(title=False, loc='upper left', fontsize=12)
     ax.set_title(f"Raspberry Pi CPU Temperature (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
     save_image('pitemp.png')
@@ -332,6 +334,7 @@ def generate_air_quality_chart():
                          color=colors[p],
                          alpha=.2)
 
+    ax.yaxis.grid()
     ax.legend(title=False, loc='upper left', fontsize=12)
     ax.set_title(f"Air Quality Monitor (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
     save_image('airquality.png')
@@ -436,6 +439,7 @@ def generate_pistat_chart():
                              y[h] + err,
                              alpha=.2,
                              color=colors[h])
+        ax.yaxis.grid()
         ax.legend(title=False, loc='upper left', fontsize=12)
         ax.set_title(f"Raspberry Pi {stat.capitalize()} Usage % (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
         save_image(f'pi{stat}.png')
@@ -467,8 +471,11 @@ from(bucket:"enviro")
     colors = pi_colors(pd.Series(df.drop(columns=['_time','_measurement']).columns.values), file_suffix="-enviro")
     stats_to_ignore = ['color_temperature','luminance']
 
-    for stat in (s for s in df['_measurement'].unique() if s not in stats_to_ignore and not s.startswith('gas_')):
+    all_stats = df['_measurement'].unique()
+    for stat in (s for s in all_stats if s not in stats_to_ignore and not s.startswith('gas_')):
         stat_df = df.loc[df['_measurement'] == stat].drop(columns=['_measurement']).set_index('_time')
+        stat_df = stat_df.groupby(pd.Grouper(freq='D')).mean()
+        stat_df = stat_df.rolling(7).mean().dropna(how='all')
         hosts = stat_df.columns
         stat_df = stat_df.rename(columns={
             c: c.replace('-',' ').replace('_',' ').title()
@@ -480,13 +487,14 @@ from(bucket:"enviro")
             color=[colors[h] for h in hosts],
             xlabel=''
         )
+        ax.yaxis.grid()
         ax.legend(title=False, loc='upper left', fontsize=12)
         title = "Air Quality Index" if stat == 'aqi' else stat.capitalize()
 
         ax.set_title(f"Enviro Indoor: {title} (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
         save_image(f'enviro-{stat}.png')
 
-    gas_stats = [s for s in df['_measurement'].unique() if s.startswith('gas_')]
+    gas_stats = [s for s in all_stats if s.startswith('gas_')]
     if gas_stats:
         gas_df = df.loc[df['_measurement'].isin(gas_stats)]
         gas_df = gas_df.assign(_measurement=gas_df['_measurement'].map({
@@ -496,15 +504,18 @@ from(bucket:"enviro")
         }))
         gas_df = gas_df.set_index(['_time','_measurement'])
         gas_df = gas_df.unstack('_measurement')
-        gas_df.columns = gas_df.columns.to_flat_index()
-        hosts = [h for h,_ in gas_df.columns]
-        gas_df.columns = [h.replace('-',' ').replace('_',' ').title() + " - " + g for h,g in gas_df.columns]
+        gas_df = gas_df.groupby(pd.Grouper(freq='D')).mean()
+        gas_df = gas_df.rolling(7).mean().dropna(how='all')
+        cols = gas_df.columns.to_flat_index()
+        hosts = [h for h,_ in cols]
+        gas_df.columns = [h.replace('-',' ').replace('_',' ').title() + " - " + g for h,g in cols]
         ax = gas_df.plot(
 			figsize=(10,6),
 			linewidth=2,
             color=[colors[h] for h in hosts],
 			xlabel=''
     	)
+        ax.yaxis.grid()
         ax.legend(title=False, loc='upper left', fontsize=12)
         ax.set_title(f"Enviro Indoor: Gases (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
         save_image('enviro-gas.png')
@@ -560,11 +571,12 @@ def generate_weather_charts(alert_email: str):
         stat_df = stat_df.dropna(axis=1, how='all')
         stat_df = stat_df.interpolate()
         stat_df = stat_df.groupby(pd.Grouper(freq='D')).mean()
+        stat_df = stat_df.rolling(7).mean().dropna(how='all')
         hosts = stat_df.columns
         stat_df = stat_df.rename(columns={
             c: (
-                'EC - Current' if c.startswith('ec-')
-                else f"EC - {c[-1]} Day Forecast" if c.startswith('forecast-')
+                'Environment Canada' if c.startswith('ec-')
+                else f"Environment Canada - Forecast -{c[-1]}d" if c.startswith('forecast-')
                 else c.replace('-',' ').replace('_',' ').title()
                 )
             for c in stat_df.columns
@@ -575,6 +587,7 @@ def generate_weather_charts(alert_email: str):
             color=[colors[h] for h in hosts],
             xlabel=''
         )
+        ax.yaxis.grid()
         ax.legend(title=False, loc='upper left', fontsize=12)
         title = stat.capitalize()
 
@@ -602,6 +615,8 @@ def generate_enviro_voltage_chart():
     colors = pi_colors(pd.Series(df.drop(columns=['_time','_measurement']).columns.values), file_suffix="-enviro")
 
     df = df.drop(columns=['_measurement']).set_index('_time')
+    df = df.groupby(pd.Grouper(freq='D')).mean()
+    df = df.interpolate('linear')
     hosts = df.columns
     ax = df.plot(
         figsize=(10,6),
@@ -609,6 +624,7 @@ def generate_enviro_voltage_chart():
         color=[colors[h] for h in hosts],
         xlabel=''
     )
+    ax.yaxis.grid()
     ax.legend(title=False, loc='upper left', fontsize=12)
     ax.set_title(f"Enviro Battery Voltage (updated {update_ts.strftime('%b %d %H:%M')})", fontsize=14)
     save_image(f'enviro-voltage.png')
